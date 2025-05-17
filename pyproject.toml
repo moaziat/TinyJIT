@@ -1,0 +1,9 @@
+[project]
+name="tinyjit"
+version="0.0.0"
+dependencies=[
+    "llvmlite"
+]
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
