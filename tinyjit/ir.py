@@ -291,10 +291,13 @@ class Lowerer:
             c_ptr = self.builder.gep(C_ptr, [ir.Constant(ir.IntType(32), j)], name=f"c_init_ptr{j}")
             self.builder.store(ir.Constant(ir.FloatType(), 0.0), c_ptr)
 
-        #----
+        #-------
         # for j < n; j++ ......
         #      for i <k; i++......
-        #*****
+        #          instructions....
+        #      end loop i 
+        # end loop j
+        #-------------
         #init i, j iterator
         i_ptr = self.builder.alloca(ir.IntType(32), name="i")
         j_ptr = self.builder.alloca(ir.IntType(32), name="j")
@@ -370,3 +373,90 @@ class Lowerer:
 
     def _lower_mat_vec_mul(self, A_ptr, B_ptr, C_ptr, m, k): 
         """mat-vec mul: (m, k) @ (k,) -> (m,)"""
+
+        for i in range(m):
+            c_ptr = self.builder.gep(C_ptr, [ir.Constant(ir.IntType(32), i)], name=f"c_init_ptr_{i}")
+            self.builder.store(ir.Constant(ir.FloatType(), 0.0), c_ptr)
+
+        #-------
+        # for i < m; i++ ......
+        #      for j <k; j++......
+        #          instructions....
+        #      end loop j
+        # end loop i
+        #-------------
+        i_ptr = self.builder.alloca(ir.IntType(32), name="i")
+        j_ptr = self.builder.alloca(ir.IntType(32), name="j")
+        
+        # For each row i
+        self.builder.store(ir.Constant(ir.IntType(32), 0), i_ptr)
+        
+        loop_i_cond = self.llvm_func.append_basic_block("loop_i_cond")
+        loop_i_body = self.llvm_func.append_basic_block("loop_i_body")
+        loop_i_end = self.llvm_func.append_basic_block("loop_i_end")
+        
+        self.builder.branch(loop_i_cond)
+        
+        # i loop condition
+        self.builder.position_at_start(loop_i_cond)
+        i_val = self.builder.load(i_ptr, name="i_val")
+        i_cond = self.builder.icmp_signed("<", i_val, ir.Constant(ir.IntType(32), m), name="i_cond")
+        self.builder.cbranch(i_cond, loop_i_body, loop_i_end)
+        
+        # i loop body
+        self.builder.position_at_start(loop_i_body)
+        
+        # Reset j to 0 for inner loop
+        self.builder.store(ir.Constant(ir.IntType(32), 0), j_ptr)
+        
+        loop_j_cond = self.llvm_func.append_basic_block("loop_j_cond")
+        loop_j_body = self.llvm_func.append_basic_block("loop_j_body")
+        loop_j_end = self.llvm_func.append_basic_block("loop_j_end")
+        
+        self.builder.branch(loop_j_cond)
+        
+        # j loop condition
+        self.builder.position_at_start(loop_j_cond)
+        j_val = self.builder.load(j_ptr, name="j_val")
+        j_cond = self.builder.icmp_signed("<", j_val, ir.Constant(ir.IntType(32), k), name="j_cond")
+        self.builder.cbranch(j_cond, loop_j_body, loop_j_end)
+        
+        # j loop body: C[i] += A[i,j] * B[j]
+        self.builder.position_at_start(loop_j_body)
+        
+        # Load A[i,j] = A[i*k + j]
+        a_idx = self.builder.mul(i_val, ir.Constant(ir.IntType(32), k), name="a_row_offset")
+        a_idx = self.builder.add(a_idx, j_val, name="a_idx")
+        a_ptr = self.builder.gep(A_ptr, [a_idx], name="a_ptr")
+        a_val = self.builder.load(a_ptr, name="a_val")
+        
+        # Load B[j]
+        b_ptr = self.builder.gep(B_ptr, [j_val], name="b_ptr")
+        b_val = self.builder.load(b_ptr, name="b_val")
+        
+        # mul
+        prod = self.builder.fmul(a_val, b_val, name="prod")
+        
+        # store to C[i]
+        c_ptr = self.builder.gep(C_ptr, [i_val], name="c_ptr")
+        c_val = self.builder.load(c_ptr, name="c_val")
+        c_val = self.builder.fadd(c_val, prod, name="c_val_updated")
+        self.builder.store(c_val, c_ptr)
+        
+        #j++
+        j_next = self.builder.add(j_val, ir.Constant(ir.IntType(32), 1), name="j_next")
+        self.builder.store(j_next, j_ptr)
+        self.builder.branch(loop_j_cond)
+        
+        #j++
+        self.builder.position_at_start(loop_j_end)
+        
+        #i++
+        i_next = self.builder.add(i_val, ir.Constant(ir.IntType(32), 1), name="i_next")
+        self.builder.store(i_next, i_ptr)
+        self.builder.branch(loop_i_cond)
+        
+        # End i loop
+        self.builder.position_at_start(loop_i_end)
+
+        
