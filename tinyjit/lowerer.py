@@ -39,12 +39,30 @@ class Lowerer:
     
     def lower_op(self, op):
         if op.op_type == "add": 
-            self.lower_add(op)
+            self.l_lower_elementwise_binary(op, self.builder.fadd)
+        elif op.op_type == "sub":
+            self._lower_elementwise_binary(op, self.builder.fsub)
+        elif op.op_type == "mul":
+            self._lower_elementwise_binary(op, self.builder.fmul)
+        elif op.op_type == "div":
+            self._lower_elementwise_binary(op, self.builder.fdiv)
+        elif op.op_type == "pow":
+            self._lower_pow(op)
+        elif op.op_type == "exp":
+            self._lower_elementwise_unary(op, "exp")
+        elif op.op_type == "log":
+            self._lower_elementwise_unary(op, "log")
+        elif op.op_type == "add_scalar":
+            self._lower_scalar_binary(op, self.builder.fadd)
         elif op.op_type == "matmul": 
             self.lower_mul(op)
+        
         else: 
             raise NotImplementedError(f"Op {op.op_type} not supported yet.")
-    def lower_add(self, op): 
+    
+
+    #generic imp for elementwise ops 
+    def _lower_elementwise_binary(self, op): 
         A, B = op.inputs
         C, = op.outputs
 
@@ -61,9 +79,9 @@ class Lowerer:
         self.builder.store(ir.Constant(ir.IntType(32), 0), i_ptr)
 
         # Basic loop blocks
-        loop_cond_block= self.llvm_func.append_basic_block("loop_cond")
-        loop_body_block= self.llvm_func.append_basic_block("loop_body")
-        loop_end_block= self.llvm_func.append_basic_block("loop_end")
+        loop_cond_block= self.llvm_func.append_basic_block(f"{op.op_type}loop_cond")
+        loop_body_block= self.llvm_func.append_basic_block(f"{op.op_type}loop_body")
+        loop_end_block= self.llvm_func.append_basic_block(f"{op.op_type}loop_end")
         
         #Branch from entry to condition block
         self.builder.branch(loop_cond_block)
@@ -84,7 +102,7 @@ class Lowerer:
         b_val = self.builder.load(b_ptr, name="b_val")
 
         #A[i] + B[i]
-        c_val = self.builder.fadd(a_val, b_val, name="c_val")
+        c_val = self.builder.fadd(a_val, b_val, name=f"{op.op_type}c_val")
         
         #store to C[i]
         c_ptr = self.builder.gep(C_ptr, [i_val], name="c_ptr")
@@ -200,7 +218,7 @@ class Lowerer:
         self.builder.position_at_start(loop_j_body)
 
         #i = 0 (inner loop)
-        self.builder.store(ir.Constant(ir.IntType(32), 0), i_ptr)        loop_j_cond = self.llvm_func.append_basic_block("loop_j_cond")
+        self.builder.store(ir.Constant(ir.IntType(32), 0), i_ptr)        
      
         loop_i_cond = self.llvm_func.append_basic_block("loop_i_cond")
         loop_i_body = self.llvm_func.append_basic_block("loop_i_body")
