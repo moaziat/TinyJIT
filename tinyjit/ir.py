@@ -28,8 +28,22 @@ class Tensor:
         self.op = op
     
     def __matmul__(self, other): 
+        assert len(self.shape) >= 1 and len(other.shape) >= 1, "Tensors must have at least 1 dimension"
         assert self.shape[-1] == other.shape[0], "Shape mismatch for matrix multiplication"
-        out_shape = (self.shape[0], other.shape[-1])
+        
+        if len(self.shape) == 1 and len(other.shape) == 1: 
+            #vec-vec mul: (n,) @ (n,) -> scalar (1,)
+            out_shape = (1,)
+        elif len(self.sahpe) == 1: 
+            #vec-mat mul: (n,) @ (n,m) -> (m,)
+            out_shape = other.shape[1:]
+        elif len(other.shape) == 1: 
+            #mat-vec mul: (m, n) @ (m,) -> (m,)
+            out_shape = self.shape[:-1]
+        else: 
+            #ordinary matmul 
+            out_shape = self.shape[:-1] + other.shape[1:]
+
         out_tensor = Tensor(out_shape, dtype=self.dtype)
         op = Op("matmul", inputs=[self, other], outputs=[out_tensor])
         out_tensor.op = op
@@ -202,3 +216,67 @@ class Lowerer:
         self.builder.store(i_next, i_ptr)
         self.builder.branch(loop_cond_block)
         self.builder.position_at_start(loop_end_block) 
+    
+    def lower_mul(self, op): 
+        A, B = op.inputs
+        C, = op.outputs
+
+        A_ptr = self.tensor_map[A.name]
+        B_ptr = self.tensor_map[B.name]
+        C_ptr = self.tensor_map[C.name]
+
+        #vec-vec mul
+        if len(A.shape) == 1 and len(B.shape) == 1: 
+            self._lower_vector_dot_product(A_ptr, B_ptr, C_ptr, A.shape[0])
+        #vec-mat mul 
+        elif len(A.shape) == 1: 
+            self._lower_vec_mat_mul(A_ptr, B_ptr, A.shape[0], B.shape[0])
+
+
+    def _lower_vector_dot_product(self, A_ptr, B_ptr, C_ptr, k): 
+        """ Vector dot product (k,) @ (k,) -> (1,)"""
+        
+        #init res to 0
+        self.builder.store(ir.Constant(ir.FloatType(), 0.0), C_ptr)
+
+        i_ptr = self.builder.alloca(ir.IntType(32), name="i")
+        self.builder.store(ir.Constant(ir.IntType(32), 0), i_ptr)
+
+        loop_cond = self.llvm_func.append_basic_block("dot_loop_cond")
+        loop_body = self.llvm_func.append_basic_block("dot_loop_body")
+        loop_end = self.llvm_func.append_basic_block("dot_loop_end")
+
+        self.builder.branch(loop_cond)
+
+        #loop condition: i < k
+        self.builder.position_at_start(loop_cond)
+        i_val = self.builder.load(i_ptr, name="i_val")
+        cond = self.builder.icmp_signed("<", i_val, ir.Constant(ir.IntType(32), k), name="dot_cond")
+        self.builder.cbranch(cond, loop_body, loop_end)
+
+        #loop body: res += A[i] * B[i]
+        self.builder.position_at_start(loop_body)
+
+        # Load A[i]
+        a_ptr = self.builder.gep(A_ptr, [i_val], name="a_ptr")
+        a_val = self.builder.load(a_ptr, name="a_val")
+        
+        # Load B[i]
+        b_ptr = self.builder.gep(B_ptr, [i_val], name="b_ptr")
+        b_val = self.builder.load(b_ptr, name="b_val")
+
+        #mul 
+        prod = self.builder.fmul(a_val, b_val, name="prod")
+
+        #Store to C[i]
+        c_val = self.builder.load(C_ptr, name="c_val")
+        c_val = self.builder.fadd(c_val, prod, name="c_val_updated")
+        self.builder.store(c_val, C_ptr)
+
+        #increment i 
+        i_next = self.builder.add(i_val, ir.Constant(ir.IntType(32), 1), name="i_next")
+        self.builder.store(i_next, i_ptr)
+        self.builder.branch(loop_cond)
+
+        #end loop 
+        self.builder.position_at_start(loop_end)
