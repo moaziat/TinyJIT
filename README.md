@@ -1,2 +1,11 @@
 # TinyJIT
-tiny python-based Just In Time compiler for tensor ops with fusion, tiling, and LLVM/Triton backends
+A lightweight JIT compiler for tensor operations that uses LLVM to generate effecient machine code. 
+
+features; 
+ -  define tensor operations
+ - automatic construction of computational graphs 
+ - support for various mathematical operation (let's say high school level)
+ - JIT compilation to native code 
+
+
+--- This project is just for fun and to learn more about compilers ^^
