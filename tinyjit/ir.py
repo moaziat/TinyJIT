@@ -230,8 +230,10 @@ class Lowerer:
             self._lower_vector_dot_product(A_ptr, B_ptr, C_ptr, A.shape[0])
         #vec-mat mul 
         elif len(A.shape) == 1: 
-            self._lower_vec_mat_mul(A_ptr, B_ptr, A.shape[0], B.shape[0])
-
+            self._lower_vec_mat_mul(A_ptr, B_ptr, C_ptr, A.shape[0], B.shape[0])
+        #mat-vec mul 
+        elif len(B.shape) == 1: 
+            self._lower_mat_vec_mul(A_ptr, B_ptr, C_ptr, A.shape[0], A.shape[1])
 
     def _lower_vector_dot_product(self, A_ptr, B_ptr, C_ptr, k): 
         """ Vector dot product (k,) @ (k,) -> (1,)"""
@@ -280,3 +282,91 @@ class Lowerer:
 
         #end loop 
         self.builder.position_at_start(loop_end)
+    
+    def _lower_vec_mat_mul(self, A_ptr, B_ptr, C_ptr, k, n): 
+        """Vector-matrix mul (k,) @ (k,n) -> (n,)"""
+
+        #init all elements of C to 0 
+        for j in range(n):
+            c_ptr = self.builder.gep(C_ptr, [ir.Constant(ir.IntType(32), j)], name=f"c_init_ptr{j}")
+            self.builder.store(ir.Constant(ir.FloatType(), 0.0), c_ptr)
+
+        #----
+        # for j < n; j++ ......
+        #      for i <k; i++......
+        #*****
+        #init i, j iterator
+        i_ptr = self.builder.alloca(ir.IntType(32), name="i")
+        j_ptr = self.builder.alloca(ir.IntType(32), name="j")
+
+        # for each col j 
+        self.builder.store(ir.Constant(ir.IntType(32), 0), j_ptr)
+
+        loop_j_cond = self.llvm_func.append_basic_block("loop_j_cond")
+        loop_j_body = self.llvm_func.append_basic_block("loop_j_body")
+        loop_j_end = self.llvm_func.append_basic_block("loop_j_end")
+
+        self.builder.branch(loop_j_cond)
+
+        #j loop cond 
+        self.builder.position_at_start(loop_j_cond)
+        j_val = self.builder.load(j_ptr, name="j_val")
+        j_cond = self.builder.icmp_signed("<", j_val, ir.Constant(ir.IntType(32), n), name="j_cond")
+        self.builder.cbranch(j_cond, loop_j_body, loop_j_end)
+
+        #j loop body 
+        self.builder.position_at_start(loop_j_body)
+
+        #i = 0 (inner loop)
+        self.builder.store(ir.Constant(ir.IntType(32), 0), i_ptr)        loop_j_cond = self.llvm_func.append_basic_block("loop_j_cond")
+     
+        loop_i_cond = self.llvm_func.append_basic_block("loop_i_cond")
+        loop_i_body = self.llvm_func.append_basic_block("loop_i_body")
+        loop_i_end = self.llvm_func.append_basic_block("loop_i_end")
+
+        #i loop cond 
+        self.builder.position_at_start(loop_i_cond)
+        i_val = self.builder.load(i_ptr, name="i_val")
+        i_cond = self.builder.icmp_signed("<", i_val, ir.Constant(ir.IntType(32), k), name="i_cond")
+        self.builder.cbranch(i_cond, loop_i_body, loop_i_end)
+
+        #i loop body C[i] += A[i] * B[i, j]
+        self.builder.position_at_start(loop_i_body)
+
+        #load A[i]
+        a_ptr = self.builder.gep(A_ptr, [i_val], name="a_ptr")
+        a_val = self.builder.load(a_ptr, name="a_val")
+
+        # Load B[i,j] = B[i*n + j]
+        b_idx = self.builder.mul(i_val, ir.Constant(ir.IntType(32), n), name="b_row_offset")
+        b_idx = self.builder.add(b_idx, j_val, name="b_idx")
+        b_ptr = self.builder.gep(B_ptr, [b_idx], name="b_ptr")
+        b_val = self.builder.load(b_ptr, name="b_val")
+
+        #mul 
+        prod = self.builder.fmul(a_val, b_val, name="prod")
+
+        #Store to C[j]
+        c_ptr = self.builder.gep(C_ptr, [j_val], name="c_ptr")
+        c_val = self.builder.load(c_ptr, name="c_val")
+        c_val = self.builder.fadd(c_val, prod, name="c_val_updated")
+        self.builder.store(c_val, c_ptr)
+    
+        #i++
+        i_next = self.builder.add(i_val, ir.Constant(ir.IntType(32), 1), name="i_next")
+        self.builder.store(i_next, i_ptr)
+        self.builder.branch(loop_i_cond)
+        
+        # End i loop
+        self.builder.position_at_start(loop_i_end)
+        
+        #j++
+        j_next = self.builder.add(j_val, ir.Constant(ir.IntType(32), 1), name="j_next")
+        self.builder.store(j_next, j_ptr)
+        self.builder.branch(loop_j_cond)
+        
+        # End j loop
+        self.builder.position_at_start(loop_j_end)
+
+    def _lower_mat_vec_mul(self, A_ptr, B_ptr, C_ptr, m, k): 
+        """mat-vec mul: (m, k) @ (k,) -> (m,)"""
