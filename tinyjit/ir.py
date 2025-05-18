@@ -76,6 +76,65 @@ class Tensor:
         out_tensor.op = op 
         return out_tensor
     
+    def sqrt(self): 
+        out_tensor = Tensor(self.shape, dtype=self.dtype)
+        op = Op("sqrt", inputs=[self], outputs=[out_tensor]) 
+        out_tensor.op = op 
+        return out_tensor
+
+    def sin(self): 
+        out_tensor = Tensor(self.shape, dtype=self.dtype)
+        out_tensor = Tensor(self.shape, dtype=self.dtype)
+        op = Op("sin", inputs=[self], outputs=[out_tensor]) 
+        out_tensor.op = op 
+        return out_tensor
+    
+    def cos(self): 
+        out_tensor = Tensor(self.shape, dtype=self.dtype)
+        out_tensor = Tensor(self.shape, dtype=self.dtype)
+        op = Op("cos", inputs=[self], outputs=[out_tensor]) 
+        out_tensor.op = op 
+        return out_tensor
+
+    def abs(self):
+        out_tensor = Tensor(self.shape, dtype=self.dtype)
+        op = Op("abs", inputs=[self], outputs=[out_tensor])
+        out_tensor.op = op
+        return out_tensor  
+    
+    def tan(self): 
+        out_tensor = Tensor(self.shape, dtype=self.dtype)
+        op = Op("tan", inputs=[self], outputs=[out_tensor])
+        out_tensor.op = op
+        return out_tensor  
+    
+    def dot(self, other):
+        if len(self.shape) != 1 or len(other.shape) != 1:
+            raise ValueError("Dot product only defined for vectors (1D tensors)")
+        if self.shape[0] != other.shape[0]:
+            raise ValueError(f"Vectors must have same dimension: {self.shape} vs {other.shape}")
+        out_tensor = Tensor((1,), dtype=self.dtype)
+        op = Op("dot", inputs=[self, other], outputs=[out_tensor])
+        out_tensor.op = op
+        return out_tensor
+    
+    def norm(self): #||vec||
+        if len(self.shape) != 1:
+            raise ValueError("Norm operation is only defined for vectors (1D tensors)")
+        out_tensor = Tensor((1,), dtype=self.dtype)
+        op = Op("norm", inputs=[self], outputs=[out_tensor])
+        out_tensor.op = op
+        return out_tensor
+    
+    def determinant(self):
+        if len(self.shape) != 2 or self.shape[0] != self.shape[1]:
+            raise ValueError("Determinant only defined for square matrices")
+        #shape=(1,) because the res is a scalar
+        out_tensor = Tensor((1,), dtype=self.dtype)
+        op = Op("determinant", inputs=[self], outputs=[out_tensor])
+        out_tensor.op = op
+        return out_tensor
+
     def __add_scalar__(self, scalar_value): 
         out_tensor = Tensor(shape=self.shape, dtype=self.dtype)
         op = Op("add_scalar", inputs=[self], outputs=[out_tensor], attributes={"value": scalar_value})
@@ -108,6 +167,16 @@ class Tensor:
         op = Op("matmul", inputs=[self, other], outputs=[out_tensor])
         out_tensor.op = op
         return out_tensor
+    
+    def derivative(self, with_respect_to=0): 
+        if len(self.shape) != 2 or self.shape[1] != 2:
+            raise ValueError("Derivative requires a 2D tensor with pairs of (x,y) values")
+        out_tensor = Tensor((self.shape[0]-1, 2), dtype=self.dtype)
+        op = Op("derivative", inputs=[self], outputs=[out_tensor], 
+                attributes={"with_respect_to": with_respect_to})
+        out_tensor.op = op
+        return out_tensor
+    
     def __repr__(self): 
         return f"%{self.name}: {self.dtype}{self.shape}"
     

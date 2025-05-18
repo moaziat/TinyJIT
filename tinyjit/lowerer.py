@@ -39,7 +39,7 @@ class Lowerer:
     
     def lower_op(self, op):
         if op.op_type == "add": 
-            self.l_lower_elementwise_binary(op, self.builder.fadd)
+            self._lower_elementwise_binary(op, self.builder.fadd)
         elif op.op_type == "sub":
             self._lower_elementwise_binary(op, self.builder.fsub)
         elif op.op_type == "mul":
@@ -49,20 +49,38 @@ class Lowerer:
         elif op.op_type == "pow":
             self._lower_pow(op)
         elif op.op_type == "exp":
-            self._lower_elementwise_unary(op, "exp")
+            self._lower_elementwise_unary(op, "llvm.exp")
         elif op.op_type == "log":
-            self._lower_elementwise_unary(op, "log")
+            self._lower_elementwise_unary(op, "llvm.log")
+        elif op.op_type == "sqrt":
+            self._lower_elementwise_unary(op, "llvm.sqrt")
+        elif op.op_type == "sin":
+            self._lower_elementwise_unary(op, "llvm.sin")
+        elif op.op_type == "cos":
+            self._lower_elementwise_unary(op, "llvm.cos")
+        elif op.op_type == "abs":
+            self._lower_elementwise_unary(op, "llvm.fabs")
+        elif op.op_type == "tan":
+            self._lower_tan(op)
+        elif op.op_type == "dot":
+            self._lower_vector_dot_product(op)
+        elif op.op_type == "norm":
+            self._lower_norm(op)
+        elif op.op_type == "determinant":
+            self._lower_determinant(op)
         elif op.op_type == "add_scalar":
             self._lower_scalar_binary(op, self.builder.fadd)
         elif op.op_type == "matmul": 
             self.lower_mul(op)
+        elif op.op_type == "derivative":
+            self._lower_derivative(op)
         
         else: 
             raise NotImplementedError(f"Op {op.op_type} not supported yet.")
     
 
-    #generic imp for elementwise ops 
-    def _lower_elementwise_binary(self, op): 
+    #generic imp for elementwise binary ops 
+    def _lower_elementwise_binary(self, op, binary_op_func): 
         A, B = op.inputs
         C, = op.outputs
 
@@ -113,6 +131,180 @@ class Lowerer:
         self.builder.store(i_next, i_ptr)
         self.builder.branch(loop_cond_block)
         self.builder.position_at_start(loop_end_block) 
+    
+    #generic imp for elementwise unary op
+    def _lower_elementwise_unary(self, op, intrinsic_name): 
+        A, = op.inputs
+        B, = op.outputs
+
+        A_ptr = self.tensor_map[A.name]
+        B_ptr = self.tensor_map[B.name]
+
+        size = 1 
+        for dim in B.shape:
+            size *= dim 
+
+        i_ptr = self.builder.alloca(ir.IntType(32), name="i")
+        self.builder.store(ir.Constant(ir.IntType(32), 0), i_ptr)
+        # Basic loop blocks
+        loop_cond_block = self.llvm_func.append_basic_block(f"{op.op_type}_loop_cond")
+        loop_body_block = self.llvm_func.append_basic_block(f"{op.op_type}_loop_body")
+        loop_end_block = self.llvm_func.append_basic_block(f"{op.op_type}_loop_end")
+        
+        # Branch from current to condition block
+        self.builder.branch(loop_cond_block)
+        
+        # Loop condition: i < size
+        self.builder.position_at_start(loop_cond_block)
+        i_val = self.builder.load(i_ptr, name="i_val")
+        cond = self.builder.icmp_signed("<", i_val, ir.Constant(ir.IntType(32), size), name="cond")
+        self.builder.cbranch(cond, loop_body_block, loop_end_block)
+        
+        # Loop body
+        self.builder.position_at_start(loop_body_block)
+        
+        # Load A[i]
+        a_ptr = self.builder.gep(A_ptr, [i_val], name="a_ptr")
+        a_val = self.builder.load(a_ptr, name="a_val")
+        
+        # Call the appropriate intrinsic
+        intrinsic = self.module.declare_intrinsic(intrinsic_name, [ir.FloatType()])
+        b_val = self.builder.call(intrinsic, [a_val], name=f"{op.op_type}_result")
+        
+        # Store to B[i]
+        b_ptr = self.builder.gep(B_ptr, [i_val], name="b_ptr")
+        self.builder.store(b_val, b_ptr)
+        
+        # i = i + 1
+        i_next = self.builder.add(i_val, ir.Constant(ir.IntType(32), 1), name="i_next")
+        self.builder.store(i_next, i_ptr)
+        self.builder.branch(loop_cond_block)
+        
+        # End loop
+        self.builder.position_at_start(loop_end_block)
+
+    def _lower_tan(self, op): #tan(x) = sin(x) / cos(x)
+
+        A, = op.inputs
+        B, = op.outputs
+        
+        A_ptr = self.tensor_map[A.name]
+        B_ptr = self.tensor_map[B.name]
+        
+        # Calculate total size
+        size = 1
+        for dim in B.shape:
+            size *= dim
+        
+        # Allocate loop counter
+        i_ptr = self.builder.alloca(ir.IntType(32), name="i")
+        self.builder.store(ir.Constant(ir.IntType(32), 0), i_ptr)
+        
+        # Basic loop blocks
+        loop_cond_block = self.llvm_func.append_basic_block("tan_loop_cond")
+        loop_body_block = self.llvm_func.append_basic_block("tan_loop_body")
+        loop_end_block = self.llvm_func.append_basic_block("tan_loop_end")
+        
+        # Branch from current to condition block
+        self.builder.branch(loop_cond_block)
+        
+        # Loop condition: i < size
+        self.builder.position_at_start(loop_cond_block)
+        i_val = self.builder.load(i_ptr, name="i_val")
+        cond = self.builder.icmp_signed("<", i_val, ir.Constant(ir.IntType(32), size), name="cond")
+        self.builder.cbranch(cond, loop_body_block, loop_end_block)
+        
+        # Loop body
+        self.builder.position_at_start(loop_body_block)
+        
+        # Load A[i]
+        a_ptr = self.builder.gep(A_ptr, [i_val], name="a_ptr")
+        a_val = self.builder.load(a_ptr, name="a_val")
+        
+        # Calculate sin(x)
+        sin_intrinsic = self.module.declare_intrinsic("llvm.sin", [ir.FloatType()])
+        sin_val = self.builder.call(sin_intrinsic, [a_val], name="sin_val")
+        
+        # Calculate cos(x)
+        cos_intrinsic = self.module.declare_intrinsic("llvm.cos", [ir.FloatType()])
+        cos_val = self.builder.call(cos_intrinsic, [a_val], name="cos_val")
+        
+        # Calculate tan(x) = sin(x) / cos(x)
+        tan_val = self.builder.fdiv(sin_val, cos_val, name="tan_val")
+        
+        # Store to B[i]
+        b_ptr = self.builder.gep(B_ptr, [i_val], name="b_ptr")
+        self.builder.store(tan_val, b_ptr)
+        
+        # i = i + 1
+        i_next = self.builder.add(i_val, ir.Constant(ir.IntType(32), 1), name="i_next")
+        self.builder.store(i_next, i_ptr)
+        self.builder.branch(loop_cond_block)
+        
+        # End loop
+        self.builder.position_at_start(loop_end_block)
+    
+    def _lower_norm(self, op): # v = (x, y) -> ||v|| = sqrt(x**2 + y**2)
+
+        A, = op.inputs
+        B, = op.outputs
+        
+        A_ptr = self.tensor_map[A.name]
+        B_ptr = self.tensor_map[B.name]
+        
+        # Initialize sum of squares to 0
+        sum_sq_ptr = self.builder.alloca(ir.FloatType(), name="sum_sq")
+        self.builder.store(ir.Constant(ir.FloatType(), 0.0), sum_sq_ptr)
+        
+        # Get vector length
+        vec_len = A.shape[0]
+        
+        # Loop over vector elements
+        i_ptr = self.builder.alloca(ir.IntType(32), name="i")
+        self.builder.store(ir.Constant(ir.IntType(32), 0), i_ptr)
+        
+        loop_cond = self.llvm_func.append_basic_block("norm_loop_cond")
+        loop_body = self.llvm_func.append_basic_block("norm_loop_body")
+        loop_end = self.llvm_func.append_basic_block("norm_loop_end")
+        
+        self.builder.branch(loop_cond)
+        
+        # Loop condition: i < vec_len
+        self.builder.position_at_start(loop_cond)
+        i_val = self.builder.load(i_ptr, name="i_val")
+        cond = self.builder.icmp_signed("<", i_val, ir.Constant(ir.IntType(32), vec_len), name="norm_cond")
+        self.builder.cbranch(cond, loop_body, loop_end)
+        
+        # Loop body: sum_sq += A[i] * A[i]
+        self.builder.position_at_start(loop_body)
+        
+        # Load A[i]
+        a_ptr = self.builder.gep(A_ptr, [i_val], name="a_ptr")
+        a_val = self.builder.load(a_ptr, name="a_val")
+        
+        # Square
+        a_sq = self.builder.fmul(a_val, a_val, name="a_sq")
+        
+        # Accumulate
+        sum_sq = self.builder.load(sum_sq_ptr, name="sum_sq")
+        sum_sq = self.builder.fadd(sum_sq, a_sq, name="sum_sq_updated")
+        self.builder.store(sum_sq, sum_sq_ptr)
+        
+        # Increment i
+        i_next = self.builder.add(i_val, ir.Constant(ir.IntType(32), 1), name="i_next")
+        self.builder.store(i_next, i_ptr)
+        self.builder.branch(loop_cond)
+        
+        # End loop and calculate square root
+        self.builder.position_at_start(loop_end)
+        sum_sq = self.builder.load(sum_sq_ptr, name="final_sum_sq")
+        
+        # Calculate square root
+        sqrt_intrinsic = self.module.declare_intrinsic("llvm.sqrt", [ir.FloatType()])
+        norm_val = self.builder.call(sqrt_intrinsic, [sum_sq], name="norm_val")
+        
+        # Store result
+        self.builder.store(norm_val, B_ptr)
     
     def lower_mul(self, op): 
         A, B = op.inputs

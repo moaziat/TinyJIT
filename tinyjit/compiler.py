@@ -1,7 +1,7 @@
 import ctypes
 import numpy as np
 import llvmlite.binding as llvm 
-from tinyjit.ir import Lowerer
+from tinyjit.lowerer import Lowerer
 
 llvm.initialize()
 llvm.initialize_native_target()

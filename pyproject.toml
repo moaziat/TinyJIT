@@ -2,8 +2,7 @@
 name="tinyjit"
 version="0.0.0"
 dependencies=[
-    "llvmlite", 
-    "numpy"
+    "llvmlite"
 ]
 [build-system]
 requires = ["setuptools"]
