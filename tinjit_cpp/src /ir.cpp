@@ -1,5 +1,5 @@
 #include "../include/ir.h"
-#include <sstream>  
+#include <sstream>  // For std::stringstream
 
 int Tensor::counter = 0;
 Tensor::Tensor(const std::vector<int>& shape, DataType dtype, Op* op, const std::string& name)
@@ -12,10 +12,13 @@ Tensor::Tensor(const std::vector<int>& shape, DataType dtype, Op* op, const std:
 }
 
 Tensor* Tensor::add(Tensor* other) {
+    // Check if shapes match (e.g., both 2x2)
     if (shape != other->shape) {
         throw std::runtime_error("Shape mismatch for add");
     }
+    // Create output tensor with same shape
     Tensor* out = new Tensor(shape, dtype);
+    // Create add operation
     Op* op = new Op("add", {this, other}, {out});
     out->op = op;
     return out;
