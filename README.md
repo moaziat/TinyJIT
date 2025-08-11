@@ -1,5 +1,5 @@
 # TinyJIT
-A lightweight JIT compiler for tensor operations that uses LLVM through llvmlie to generate effecient machine code. 
+A lightweight JIT compiler for tensor operations that uses LLVM through llvmlie to generate effecient machine code. (Implementation in C++ and Python)
 
 features; 
  -  define tensor operations
