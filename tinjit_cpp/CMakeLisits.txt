@@ -1,0 +1,24 @@
+cmake_minimum_required(VERSION 3.15)
+project(tinyjit_cpp)
+
+
+find_package(LLVM 18 QUIET)
+if (NOT LLVM_FOUND)
+    find_package(LLVM 17 REQUIRED CONFIG)
+endif()
+
+include_directories(${LLVM_INCLUDE_DIRS})
+separate_arguments(LLVM_DEFINITIONS_LIST NOGLOB "${LLVM_DEFINITIONS}")
+add_definitions(${LLVM_DEFINITIONS_LIST})
+llvm_map_components_to_libnames(llvm_libs core orcjit native)
+
+set(CMAKE_CXX_STANDARD 11)
+include_directories(include)
+
+add_executable(tinyjit
+    src/ir.cpp
+    src/lowerer.cpp
+    src/compiler.cpp
+    src/main.cpp
+)
+target_link_libraries(tinyjit ${llvm_libs})
